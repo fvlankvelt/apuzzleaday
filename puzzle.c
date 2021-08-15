@@ -59,8 +59,8 @@ definition definitions[N_PIECES] = {
       'O', 'O', 'O' } } },
   { true, 4,
     { 2, 3, (cell[]) {
-      'P', 'P', 'P',
-      'P', 'P',  0 } } },
+      'P', 'P',  0,
+      'P', 'P', 'P' } } },
   { false, 4,
     { 2, 3, (cell[]) {
       'C', 'C', 'C',
@@ -82,7 +82,7 @@ definition definitions[N_PIECES] = {
   { true, 4,
     { 2, 4, (cell[]) {
       'T', 'T', 'T', 'T',
-        0, 'T',   0,   0 } } },
+        0,   0, 'T',   0 } } },
   { true, 4,
     { 2, 4, (cell[]) {
         0, 'Z', 'Z', 'Z',
@@ -127,17 +127,18 @@ void print_board(FILE * stream, cell * board) {
   }
 }
 
-void initialize_piece(definition * def, piece * piece) {
+void initialize_piece(definition * def, piece * piece, bool allow_flip) {
     // printf("Initializing piece\n");
     // print_orientation("", &def->orientation);
 
-    int n_orientations = (def->mirror + 1) * def->rotations;
+    int n_flips = (allow_flip * def->mirror + 1);
+    int n_orientations = n_flips * def->rotations;
     piece->n_orientations = n_orientations;
 
     int value_size = def->orientation.width * def->orientation.height * sizeof(cell);
     int n_values = value_size * n_orientations;
     cell * values = malloc(n_values * sizeof(cell));
-    for (int o = 0; o <= def->mirror; o++) {
+    for (int o = 0; o < n_flips; o++) {
       int x_dir = (o == 0 ? 1 : -1);
       for (int r = 0; r < def->rotations; r++) {
         bool shift_i = x_dir * rotations[r].x_x < 0 || x_dir * rotations[r].x_y < 0;
@@ -250,21 +251,22 @@ int days[] = {
 };
 
 int main(int argc, char * argv[]) {
-  if (argc < 2) {
-    fprintf(stderr, "Usage: %s <month>\n", argv[0]);
+  if (argc < 3) {
+    fprintf(stderr, "Usage: %s <month> [--noflip]\n", argv[0]);
     return -1;
   }
   int month = atoi(argv[1]);
+  bool allow_flip = (argc < 2) || (strcmp(argv[2], "--noflip") != 0);
 
   cell * board = initialize_board();
 	for (int p = 0; p < N_PIECES; p++) {
-    initialize_piece(&definitions[p], &pieces[p]);
+    initialize_piece(&definitions[p], &pieces[p], allow_flip);
 	}
 
   // for (int month = 0; month < 12; month++) {
     for (int day = 0; day < days[month]; day++) {
-      char filename[7];
-      sprintf(filename, "%s-%d", months[month], day + 1);
+      char filename[11];
+      sprintf(filename, "out/%s-%d", months[month], day + 1);
       printf("%s: ", filename);
       fflush(stdout);
 
