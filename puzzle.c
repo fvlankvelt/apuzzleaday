@@ -10,13 +10,13 @@
 typedef unsigned char bool;
 #define true ((bool) 1)
 #define false ((bool) 0)
-#define X ((bool) 1)
-#define O ((bool) 0)
+
+typedef char cell;
 
 typedef struct _orientation {
   int height;
   int width;
-  bool * value;
+  cell * value;
 } orientation;
 
 typedef struct _definition {
@@ -37,62 +37,56 @@ typedef struct _rotation {
   int y_y;
 } rotation;
 
-typedef struct _frame {
-  int x;
-  int y;
-  orientation * orientation;
-} frame;
-
 typedef struct _solution {
-  frame stack[N_PIECES];
+  cell board[BOARD_WIDTH * BOARD_HEIGHT];
   struct _solution * next;
 } solution;
 
-bool initial_board[BOARD_WIDTH * BOARD_HEIGHT];
+cell initial_board[BOARD_WIDTH * BOARD_HEIGHT];
 
-static inline void board_set(bool * board, int i, int j, bool value) {
+static inline void board_set(cell * board, int i, int j, cell value) {
   board[j * BOARD_WIDTH + i] = value;
 }
 
-static inline bool board_get(bool * board, int i, int j) {
+static inline cell board_get(cell * board, int i, int j) {
   return board[j * BOARD_WIDTH + i];
 }
 
 definition definitions[N_PIECES] = {
   { false, 2,
-    { 2, 3, (bool[]) {
-      X, X, X,
-      X, X, X } } },
+    { 2, 3, (cell[]) {
+      'O', 'O', 'O',
+      'O', 'O', 'O' } } },
   { true, 4,
-    { 2, 3, (bool[]) {
-      X, X, X,
-      X, X, O } } },
+    { 2, 3, (cell[]) {
+      'P', 'P', 'P',
+      'P', 'P',  0 } } },
   { false, 4,
-    { 2, 3, (bool[]) {
-      X, X, X,
-      X, O, X } } },
+    { 2, 3, (cell[]) {
+      'C', 'C', 'C',
+      'C',   0, 'C' } } },
   { false, 4,
-    { 3, 3, (bool[]) {
-      X, X, X,
-      X, O, O,
-      X, O, O, } } },
+    { 3, 3, (cell[]) {
+      'L', 'L', 'L',
+      'L',   0,   0,
+      'L',   0,   0, } } },
   { true, 2,
-    { 3, 3, (bool[]) {
-      X, X, O,
-      O, X, O,
-      O, X, X, } } },
+    { 3, 3, (cell[]) {
+      'S', 'S',   0,
+        0, 'S',   0,
+        0, 'S', 'S', } } },
   { true, 4,
-    { 2, 4, (bool[]) {
-      X, X, X, X,
-      X, O, O, O } } },
+    { 2, 4, (cell[]) {
+      'j', 'j', 'j', 'j',
+      'j',   0,   0,   0 } } },
   { true, 4,
-    { 2, 4, (bool[]) {
-      X, X, X, X,
-      O, X, O, O } } },
+    { 2, 4, (cell[]) {
+      'T', 'T', 'T', 'T',
+        0, 'T',   0,   0 } } },
   { true, 4,
-    { 2, 4, (bool[]) {
-      O, X, X, X,
-      X, X, O, O } } },
+    { 2, 4, (cell[]) {
+        0, 'Z', 'Z', 'Z',
+      'Z', 'Z',   0,   0 } } },
 };
 
 piece pieces[N_PIECES];
@@ -108,8 +102,9 @@ void print_orientation(char * prefix, orientation * o) {
 	for (int j = 0; j < o->height; j++) {
     printf(prefix);
 	  for (int i = 0; i < o->width; i++) {
-			if (o->value[j * o->width + i]) {
-				printf("x ");
+      int idx = j * o->width + i;
+			if (o->value[idx]) {
+				printf("%c ", o->value[idx]);
 			} else {
 				printf("  ");
 			}
@@ -118,16 +113,17 @@ void print_orientation(char * prefix, orientation * o) {
 	}
 }
 
-void print_board(bool * board) {
+void print_board(FILE * stream, cell * board) {
   for (int j = 0; j < BOARD_HEIGHT; j++) {
     for (int i = 0; i < BOARD_WIDTH; i++) {
-      if (board[j * BOARD_WIDTH + i]) {
-        printf("x ");
+      int idx = j * BOARD_WIDTH + i;
+      if (board[idx]) {
+        fprintf(stream, "%c ", board[idx]);
       } else {
-        printf("  ");
+        fprintf(stream, "  ");
       }
     }
-    printf("\n");
+    fprintf(stream, "\n");
   }
 }
 
@@ -138,9 +134,9 @@ void initialize_piece(definition * def, piece * piece) {
     int n_orientations = (def->mirror + 1) * def->rotations;
     piece->n_orientations = n_orientations;
 
-    int value_size = def->orientation.width * def->orientation.height * sizeof(bool);
+    int value_size = def->orientation.width * def->orientation.height * sizeof(cell);
     int n_values = value_size * n_orientations;
-    bool * values = malloc(n_values * sizeof(bool));
+    cell * values = malloc(n_values * sizeof(cell));
     for (int o = 0; o <= def->mirror; o++) {
       int x_dir = (o == 0 ? 1 : -1);
       for (int r = 0; r < def->rotations; r++) {
@@ -148,7 +144,7 @@ void initialize_piece(definition * def, piece * piece) {
         bool shift_j = rotations[r].y_x < 0 || rotations[r].y_y < 0;
 
         int idx = o * def->rotations + r;
-        bool * value = &values[idx * value_size];
+        cell * value = &values[idx * value_size];
         bool rotated = r % 2 == 0;
         orientation * orientation = &piece->orientations[idx];
         orientation->width = (rotated ? def->orientation.width : def->orientation.height);
@@ -171,20 +167,20 @@ void initialize_piece(definition * def, piece * piece) {
 bool * initialize_board() {
   for (int j = 0; j < BOARD_HEIGHT; j++) {
     for (int i = 0; i < BOARD_WIDTH; i++) {
-      initial_board[j * BOARD_WIDTH + i] = false;
+      initial_board[j * BOARD_WIDTH + i] = 0;
     }
   }
-  board_set(initial_board, 6, 0, true);
-  board_set(initial_board, 6, 1, true);
-  board_set(initial_board, 3, 6, true);
-  board_set(initial_board, 4, 6, true);
-  board_set(initial_board, 5, 6, true);
-  board_set(initial_board, 6, 6, true);
+  board_set(initial_board, 6, 0, 'B');
+  board_set(initial_board, 6, 1, 'B');
+  board_set(initial_board, 3, 6, 'B');
+  board_set(initial_board, 4, 6, 'B');
+  board_set(initial_board, 5, 6, 'B');
+  board_set(initial_board, 6, 6, 'B');
 
   return initial_board;
 }
 
-bool * place_piece(bool * board, orientation * o, int x, int y) {
+cell * place_piece(cell * board, orientation * o, int x, int y) {
   for (int j = 0; j < o->height; j++) {
     for (int i = 0; i < o->width; i++) {
       if (o->value[j * o->width + i] && board[(y + j) * BOARD_WIDTH + (x + i)]) {
@@ -194,44 +190,42 @@ bool * place_piece(bool * board, orientation * o, int x, int y) {
   }
   for (int j = 0; j < o->height; j++) {
     for (int i = 0; i < o->width; i++) {
-      if (o->value[j * o->width + i]) {
-        board[(y + j) * BOARD_WIDTH + (x + i)] = true;
+      int idx = j * o->width + i;
+      if (o->value[idx]) {
+        board[(y + j) * BOARD_WIDTH + (x + i)] = o->value[idx];
       }
     }
   }
   return board;
 }
 
-bool * unplace_piece(bool * board, orientation * o, int x, int y) {
+cell * unplace_piece(cell * board, orientation * o, int x, int y) {
   for (int j = 0; j < o->height; j++) {
     for (int i = 0; i < o->width; i++) {
       if (o->value[j * o->width + i]) {
-        board[(y + j) * BOARD_WIDTH + (x + i)] = false;
+        board[(y + j) * BOARD_WIDTH + (x + i)] = 0;
       }
     }
   }
 }
 
-solution * solve(bool * board, int p, frame * stack) {
+solution * solve(cell * board, int p) {
   solution * result = 0;
   if (p == N_PIECES) {
-    print_board(board);
     result = malloc(sizeof(solution));
     result->next = 0;
-    memcpy(result->stack, stack, p * sizeof(frame));
+    memcpy(result->board, board, BOARD_WIDTH * BOARD_HEIGHT * sizeof(cell));
     return result;
   }
 
   solution ** p_last = 0;
-  frame * next_stack = malloc((p + 1) * sizeof(frame));
-  memcpy(next_stack, stack, p * sizeof(frame));
   for (int o = 0; o < pieces[p].n_orientations; o++) {
     orientation * orientation = &pieces[p].orientations[o];
     for (int y = 0; y <= BOARD_HEIGHT - orientation->height; y++) {
       for (int x = 0; x <= BOARD_WIDTH - orientation->width; x++) {
-        bool * next_board = place_piece(board, orientation, x, y);
+        cell * next_board = place_piece(board, orientation, x, y);
         if (next_board) {
-          solution * solutions = solve(next_board, p + 1, next_stack);
+          solution * solutions = solve(next_board, p + 1);
           if (solutions) {
             solution ** p_last = &solutions;
             while ((*p_last)->next) {
@@ -248,12 +242,54 @@ solution * solve(bool * board, int p, frame * stack) {
   return result;
 }
 
-int main() {
-  bool * board = initialize_board();
-  board_set(board, 1, 1, true);
-  board_set(board, 6, 3, true);
+char * months[] = {
+  "jan", "feb", "mar", "apr", "mai", "jun", "jul", "aug", "sep", "okt", "nov", "des"
+};
+int days[] = {
+  31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31
+};
+
+int main(int argc, char * argv[]) {
+  if (argc < 2) {
+    fprintf(stderr, "Usage: %s <month>\n", argv[0]);
+    return -1;
+  }
+  int month = atoi(argv[1]);
+
+  cell * board = initialize_board();
 	for (int p = 0; p < N_PIECES; p++) {
     initialize_piece(&definitions[p], &pieces[p]);
 	}
-  solution * solutions = solve(board, 0, 0);
+
+  // for (int month = 0; month < 12; month++) {
+    for (int day = 0; day < days[month]; day++) {
+      char filename[7];
+      sprintf(filename, "%s-%d", months[month], day + 1);
+      printf("%s: ", filename);
+      fflush(stdout);
+
+      int month_i = month % 6;
+      int month_j = month / 6;
+      board_set(board, month_i, month_j, 'D');
+
+      int day_i = day % 7;
+      int day_j = day / 7 + 2;
+      board_set(board, day_i, day_j, 'D');
+
+      solution * solutions = solve(board, 0);
+      int n_solutions = 0;
+      FILE * out = fopen(filename, "w");
+      while (solutions) {
+        n_solutions++;
+        print_board(out, solutions->board);
+        fprintf(out, "\n");
+        solutions = solutions->next;
+      }
+      fclose(out);
+      printf("%d\n", n_solutions);
+
+      board_set(board, day_i, day_j, 0);
+      board_set(board, month_i, month_j, 0);
+    }
+  // }
 }
