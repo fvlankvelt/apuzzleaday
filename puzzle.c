@@ -105,18 +105,18 @@ rotation rotations[4] = {
 };
 
 void print_orientation(char * prefix, orientation * o) {
-	for (int j = 0; j < o->height; j++) {
+  for (int j = 0; j < o->height; j++) {
     printf(prefix);
-	  for (int i = 0; i < o->width; i++) {
+    for (int i = 0; i < o->width; i++) {
       int idx = j * o->width + i;
-			if (o->value[idx]) {
-				printf("%c ", o->value[idx]);
-			} else {
-				printf("  ");
-			}
-		}
-		printf("\n");
-	}
+      if (o->value[idx]) {
+        printf("%c ", o->value[idx]);
+      } else {
+        printf("  ");
+      }
+    }
+    printf("\n");
+  }
 }
 
 void print_board(FILE * stream, board * board) {
@@ -175,10 +175,10 @@ void initialize_piece(definition * def, piece * piece, bool allow_flip) {
           }
         }
         // print_orientation("   ", orientation);
-		    // printf("\n");
+        // printf("\n");
       }
     }
-		// printf("\n");
+    // printf("\n");
 }
 
 board * initialize_board() {
@@ -279,9 +279,9 @@ int main(int argc, char * argv[]) {
   bool allow_flip = (argc < 3) || (strcmp(argv[2], "--noflip") != 0);
 
   board * board = initialize_board();
-	for (int p = 0; p < N_PIECES; p++) {
+  for (int p = 0; p < N_PIECES; p++) {
     initialize_piece(&definitions[p], &pieces[p], allow_flip);
-	}
+  }
 
   // for (int month = 0; month < 12; month++) {
     for (int day = 0; day < days[month]; day++) {
