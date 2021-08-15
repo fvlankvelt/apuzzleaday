@@ -238,7 +238,6 @@ solution * solve(board * board, int p) {
     return result;
   }
 
-  solution ** p_last = 0;
   for (int o = 0; o < pieces[p].n_orientations; o++) {
     orientation * orientation = &pieces[p].orientations[o];
     for (int y = 0; y <= BOARD_HEIGHT - orientation->height; y++) {
