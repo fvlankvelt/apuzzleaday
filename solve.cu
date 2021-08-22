@@ -14,36 +14,58 @@
 #define OK 0
 #define OUT_OF_MEMORY 1
 
-#define NUM_THREADS_PER_BLOCK 128
+#define CUDA_STACK_SIZE 1536
+
+#ifndef DEBUG
+#define NUM_THREADS_PER_BLOCK 64
 #define NUM_BLOCKS   (2560 / NUM_THREADS_PER_BLOCK)
 #define NUM_THREADS  (NUM_BLOCKS * NUM_THREADS_PER_BLOCK)
-#define N_SOLUTIONS_PER_THREAD 128
+#define N_SOLUTIONS_PER_THREAD 2048
+#else
+#define NUM_THREADS_PER_BLOCK 1
+#define NUM_BLOCKS   1
+#define NUM_THREADS  (NUM_BLOCKS * NUM_THREADS_PER_BLOCK)
+#define N_SOLUTIONS_PER_THREAD (4096 * 128)
+#endif
+
+#ifndef DEBUG
+#define DEVICE __device__
+#define GLOBAL __global__
+#define SHARED extern __shared__
+#else
+#define DEVICE
+#define GLOBAL
+#define SHARED
+#endif
 
 typedef char cell;
-
-typedef struct _orientation {
-  int height;
-  int width;
-  bool flipped;
-  cell value[9];
-} orientation;
+typedef unsigned long long int occupied_t;
 
 typedef struct _definition {
   bool mirror;
   int rotations;
   int height;
   int width;
-  cell * value;
+  bool * set;
 } definition_t;
 
-typedef struct _piece {
-  int n_orientations;
-  orientation orientations[8];
-} piece_t;
+typedef struct _orientations {
+  bool flipped[8];
+  int width[8];
+  int height[8];
+  occupied_t occupied[8];
+} orientations_t;
+
+typedef struct _pieces {
+  cell value[N_PIECES];
+  int n_orientations[N_PIECES];
+  orientations_t orientations[N_PIECES];
+} pieces_t;
 
 typedef struct _board {
-  cell cells[BOARD_WIDTH * BOARD_HEIGHT];
-  bool flips[N_PIECES];
+  occupied_t overlay;
+  occupied_t pieces[N_PIECES];
+  bool flipped[N_PIECES];
 } board_t;
 
 typedef struct _rotation {
@@ -53,25 +75,47 @@ typedef struct _rotation {
   int y_y;
 } rotation;
 
-__device__ static inline void board_set(board_t * board, int i, int j, cell value) {
-  board->cells[j * BOARD_WIDTH + i] = value;
+inline bool isset(occupied_t o, int i, int j) {
+  return o & ((unsigned long long int) 1) << (j * BOARD_WIDTH + i);
 }
 
-__device__ static inline cell board_get(board_t * board, int i, int j) {
-  return board->cells[j * BOARD_WIDTH + i];
+DEVICE static inline void board_set(board_t * board, int i, int j) {
+  board->overlay |= ((unsigned long long int) 1) << (j * BOARD_WIDTH + i);
 }
 
+DEVICE static inline void board_unset(board_t * board, int i, int j) {
+  board->overlay &= 0xffffffffffffffff ^ (1 << (j * BOARD_WIDTH + i));
+}
+
+#ifdef DEBUG
+static inline int thread_id() { return 0; }
+#else
 __device__ static inline int thread_id() {
   return threadIdx.x + blockDim.x * blockIdx.x;
 }
+#endif
 
-void print_orientation(char * prefix, orientation * o) {
-  for (int j = 0; j < o->height; j++) {
+void print_orientation(char * prefix, const orientations_t * o, int idx) {
+  for (int j = 0; j < o->height[idx]; j++) {
     printf(prefix);
-    for (int i = 0; i < o->width; i++) {
-      int idx = j * o->width + i;
-      if (o->value[idx]) {
-        printf("%c ", o->value[idx]);
+    for (int i = 0; i < o->width[idx]; i++) {
+      if (isset(o->occupied[idx], i, j)) {
+        printf("x ");
+      } else {
+        printf("  ");
+      }
+    }
+    printf("\n");
+  }
+}
+
+void print_occupation(char * prefix, const occupied_t o) {
+  printf("%d => \n", o);
+  for (int y = 0; y < BOARD_HEIGHT; y++) {
+    printf(prefix);
+    for (int x = 0; x < BOARD_WIDTH; x++) {
+      if (isset(o, x, y)) {
+        printf("x ");
       } else {
         printf("  ");
       }
@@ -83,58 +127,95 @@ void print_orientation(char * prefix, orientation * o) {
 void print_board(FILE * stream, board_t * board) {
   fprintf(stream, "flips: ");
   for (int p = 0; p < N_PIECES; p++) {
-    if (board->flips[p]) {
+    if (board->flipped[p]) {
       fprintf(stream, "F");
     } else {
       fprintf(stream, "O");
     }
   }
   fprintf(stream, "\n");
-  for (int j = 0; j < BOARD_HEIGHT; j++) {
-    for (int i = 0; i < BOARD_WIDTH; i++) {
-      int idx = j * BOARD_WIDTH + i;
-      if (board->cells[idx]) {
-        fprintf(stream, "%c ", board->cells[idx]);
-      } else {
-        fprintf(stream, "  ");
+  for (int p = 0; p < N_PIECES; p++) {
+    fprintf(stream, "%d:\n", p);
+    for (int j = 0; j < BOARD_HEIGHT; j++) {
+      fprintf(stream, "  ");
+      for (int i = 0; i < BOARD_WIDTH; i++) {
+        if (isset(board->pieces[p], i, j)) {
+          fprintf(stream, "x ");
+        } else {
+          fprintf(stream, ". ");
+        }
       }
+      fprintf(stream, "\n");
     }
     fprintf(stream, "\n");
   }
 }
 
-__device__ void initialize_pieces(piece_t * pieces) {
-    // printf("Initializing piece\n");
+#ifdef DEBUG
+const definition_t definitions[N_PIECES] = {
+    { false, 2, 2, 3, (bool[]) {
+        1, 1, 1,
+        1, 1, 1 }, },
+    { true, 4, 2, 3, (bool[]) {
+        1, 1, 0,
+        1, 1, 1 } },
+    { false, 4, 2, 3, (bool[]) {
+        1, 1, 1,
+        1, 0, 1 } },
+    { false, 4, 3, 3, (bool[]) {
+        1, 1, 1,
+        1, 0, 0,
+        1, 0, 0 } },
+    { true, 2, 3, 3, (bool[]) {
+        1, 1, 0,
+        0, 1, 0,
+        0, 1, 1 } },
+    { true, 4, 2, 4, (bool[]) {
+        1, 1, 1, 1,
+        1, 0, 0, 0 } },
+    { true, 4, 2, 4, (bool[]) {
+        1, 1, 1, 1,
+        0, 0, 1, 0 } },
+    { true, 4, 2, 4, (bool[]) {
+        0, 1, 1, 1,
+        1, 1, 0, 0 } },
+  };
+#endif
+
+DEVICE void initialize_pieces(pieces_t * pieces) {
+    // printf("Initializing pieces\n");
     // print_orientation("", &def->orientation);
 
-  const definition_t definitions[N_PIECES] = {
-    { false, 2, 2, 3, (cell[]) {
-        'O', 'O', 'O',
-        'O', 'O', 'O' } },
-    { true, 4, 2, 3, (cell[]) {
-        'P', 'P',  0,
-        'P', 'P', 'P' } },
-    { false, 4, 2, 3, (cell[]) {
-        'C', 'C', 'C',
-        'C',   0, 'C' } },
-    { false, 4, 3, 3, (cell[]) {
-        'L', 'L', 'L',
-        'L',   0,   0,
-        'L',   0,   0, } },
-    { true, 2, 3, 3, (cell[]) {
-        'S', 'S',   0,
-          0, 'S',   0,
-          0, 'S', 'S', } },
-    { true, 4, 2, 4, (cell[]) {
-        'j', 'j', 'j', 'j',
-        'j',   0,   0,   0 } },
-    { true, 4, 2, 4, (cell[]) {
-        'T', 'T', 'T', 'T',
-          0,   0, 'T',   0 } },
-    { true, 4, 2, 4, (cell[]) {
-          0, 'Z', 'Z', 'Z',
-        'Z', 'Z',   0,   0 } },
+#ifndef DEBUG
+const definition_t definitions[N_PIECES] = {
+    { false, 2, 2, 3, (bool[]) {
+        1, 1, 1,
+        1, 1, 1 }, },
+    { true, 4, 2, 3, (bool[]) {
+        1, 1, 0,
+        1, 1, 1 } },
+    { false, 4, 2, 3, (bool[]) {
+        1, 1, 1,
+        1, 0, 1 } },
+    { false, 4, 3, 3, (bool[]) {
+        1, 1, 1,
+        1, 0, 0,
+        1, 0, 0 } },
+    { true, 2, 3, 3, (bool[]) {
+        1, 1, 0,
+        0, 1, 0,
+        0, 1, 1 } },
+    { true, 4, 2, 4, (bool[]) {
+        1, 1, 1, 1,
+        1, 0, 0, 0 } },
+    { true, 4, 2, 4, (bool[]) {
+        1, 1, 1, 1,
+        0, 0, 1, 0 } },
+    { true, 4, 2, 4, (bool[]) {
+        0, 1, 1, 1,
+        1, 1, 0, 0 } },
   };
+#endif
 
   const rotation rotations[4] = {
     {  1,  0,  0,  1 },
@@ -144,15 +225,14 @@ __device__ void initialize_pieces(piece_t * pieces) {
   };
 
   for (int p = 0; p < N_PIECES; p++) {
+    // printf("PIECE %d\n", p);
     const definition_t * def = &definitions[p];
-    piece_t * piece = &pieces[p];
 
     int n_flips = def->mirror + 1;
     int n_orientations = n_flips * def->rotations;
-    piece->n_orientations = n_orientations;
+    pieces->n_orientations[p] = n_orientations;
 
-    int value_size = def->width * def->height * sizeof(cell);
-    int n_values = value_size * n_orientations;
+    orientations_t * orientations = &pieces->orientations[p];
     for (int o = 0; o < n_flips; o++) {
       int x_dir = (o == 0 ? 1 : -1);
       for (int r = 0; r < def->rotations; r++) {
@@ -161,19 +241,21 @@ __device__ void initialize_pieces(piece_t * pieces) {
 
         int idx = o * def->rotations + r;
         bool rotated = r % 2 == 0;
-        orientation * orientation = &piece->orientations[idx];
-        orientation->width = (rotated ? def->width : def->height);
-        orientation->height = (rotated ? def->height : def->width);
-        orientation->flipped = o > 0;
-        cell * value = orientation->value;
-        for (int j = 0; j < orientation->height; j++) {
-          for (int i = 0; i < orientation->width; i++) {
+        orientations->width[idx] = (rotated ? def->width : def->height);
+        orientations->height[idx] = (rotated ? def->height : def->width);
+        orientations->flipped[idx] = o > 0;
+        orientations->occupied[idx] = 0;
+        for (int j = 0; j < orientations->height[idx]; j++) {
+          for (int i = 0; i < orientations->width[idx]; i++) {
             int i_orig = shift_i * (def->width - 1) + x_dir * (rotations[r].x_x * i + rotations[r].x_y * j);
             int j_orig = shift_j * (def->height - 1) + rotations[r].y_x * i + rotations[r].y_y * j;
-            value[j * orientation->width + i] = def->value[j_orig * def->width + i_orig];
+            int target_idx = j * BOARD_WIDTH + i;
+            if (def->set[j_orig * def->width + i_orig]) {
+              orientations->occupied[idx] |= 1 << target_idx;
+            }
           }
         }
-        // print_orientation("   ", orientation);
+        // print_orientation("   ", orientations, idx);
         // printf("\n");
       }
     }
@@ -181,94 +263,82 @@ __device__ void initialize_pieces(piece_t * pieces) {
   }
 }
 
-__device__ void initialize_board(board_t * board) {
-  for (int j = 0; j < BOARD_HEIGHT; j++) {
-    for (int i = 0; i < BOARD_WIDTH; i++) {
-      board->cells[j * BOARD_WIDTH + i] = 0;
-    }
-  }
+DEVICE void initialize_board(board_t * board) {
+  board->overlay = 0xffffffffffffffff << (BOARD_WIDTH * BOARD_HEIGHT);
   for (int p = 0; p < N_PIECES; p++) {
-    board->flips[p] = false;
+    board->pieces[p] = 0;
+    board->flipped[p] = false;
   }
-  board_set(board, 6, 0, 'B');
-  board_set(board, 6, 1, 'B');
-  board_set(board, 3, 6, 'B');
-  board_set(board, 4, 6, 'B');
-  board_set(board, 5, 6, 'B');
-  board_set(board, 6, 6, 'B');
+  board_set(board, 6, 0);
+  board_set(board, 6, 1);
+  board_set(board, 3, 6);
+  board_set(board, 4, 6);
+  board_set(board, 5, 6);
+  board_set(board, 6, 6);
 }
 
-__device__ bool place_piece(board_t * board, const orientation * o, int x, int y) {
-  for (int j = 0; j < o->height; j++) {
-    for (int i = 0; i < o->width; i++) {
-      if (o->value[j * o->width + i] && board_get(board, x + i, y + j)) {
-        return false;
-      }
-    }
+DEVICE bool place_piece(board_t * board, const occupied_t o, int x, int y, int p) {
+  occupied_t placed = (o << (y * BOARD_WIDTH + x));
+  if (board->overlay & placed) {
+    return false;
   }
-  for (int j = 0; j < o->height; j++) {
-    for (int i = 0; i < o->width; i++) {
-      int idx = j * o->width + i;
-      if (o->value[idx]) {
-        board_set(board, x + i, y + j, o->value[idx]);
-      }
-    }
-  }
+  board->overlay |= placed;
+  board->pieces[p] = placed;
   return true;
 }
 
-__device__ void unplace_piece(board_t * board, const orientation * o, int x, int y) {
-  for (int j = 0; j < o->height; j++) {
-    for (int i = 0; i < o->width; i++) {
-      if (o->value[j * o->width + i]) {
-        board_set(board, x + i, y + j, 0);
-      }
-    }
-  }
+DEVICE void unplace_piece(board_t * board, int p) {
+  board->overlay &= (0xffffffffffffffff ^ board->pieces[p]);
 }
 
 typedef struct _context {
-  const piece_t * pieces;
+  const pieces_t * pieces;
   board_t * solutions;
   board_t board;
   int n_solutions;
   int task;
 } context_t;
 
-__device__ int add_solution(context_t * ctx) {
+DEVICE int add_solution(context_t * ctx) {
+    // printf("adding solution (%d)\n", ctx->n_solutions);
+    // print_board(stdout, &ctx->board);
     if (ctx->n_solutions == N_SOLUTIONS_PER_THREAD) {
+      printf("OOUT OF MEMORY\n");
       return OUT_OF_MEMORY;
     }
-    board_t * result = &ctx->solutions[ctx->n_solutions];
-    memcpy(result, &ctx->board, sizeof(board_t));
+    // board_t * result = &ctx->solutions[ctx->n_solutions];
+    // memcpy(result, &ctx->board, sizeof(board_t));
     ctx->n_solutions = ctx->n_solutions + 1;
     return OK;
 }
 
-__device__ int solve(context_t * ctx, int p) {
+DEVICE int solve(context_t * ctx, int p) {
   if (p == N_PIECES) {
+  // if (p == 7) {
     return add_solution(ctx);
   }
 
-  for (int o = 0; o < ctx->pieces[p].n_orientations; o++) {
-    const orientation * orientation = &ctx->pieces[p].orientations[o];
-    for (int y = 0; y <= BOARD_HEIGHT - orientation->height; y++) {
-      for (int x = 0; x <= BOARD_WIDTH - orientation->width; x++) {
+  const orientations_t * orientations = &ctx->pieces->orientations[p];
+  for (int o = 0; o < ctx->pieces->n_orientations[p]; o++) {
+    for (int y = 0; y <= BOARD_HEIGHT - orientations->height[o]; y++) {
+      for (int x = 0; x <= BOARD_WIDTH - orientations->width[o]; x++) {
         if (p == 2) {
           ctx->task = ctx->task + 1;
           if ((ctx->task % NUM_THREADS) != thread_id()) {
             continue;
           }
         }
-        bool placed = place_piece(&ctx->board, orientation, x, y);
+        bool placed = place_piece(&ctx->board, orientations->occupied[o], x, y, p);
         if (placed) {
-          ctx->board.flips[p] = orientation->flipped;
+          // printf("adding %d\n", p);
+          // print_occupation(" d ", orientations->occupied[o]);
+          // print_occupation(" + ", ctx->board.pieces[p]);
+          ctx->board.flipped[p] = orientations->flipped[o];
           int subresult = solve(ctx, p + 1);
           if (subresult) {
             return subresult;
           }
-          unplace_piece(&ctx->board, orientation, x, y);
-          ctx->board.flips[p] = false;
+          unplace_piece(&ctx->board, p);
         }
       }
     }
@@ -279,42 +349,44 @@ __device__ int solve(context_t * ctx, int p) {
 const char * months[] = {
   "jan", "feb", "mar", "apr", "mai", "jun", "jul", "aug", "sep", "okt", "nov", "des"
 };
-__device__ const int days[] = {
+DEVICE const int days[] = {
   31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31
 };
 
-__global__ static void run_thread(const int month, board_t * solutions, int * n_thread_solutions) {
+GLOBAL static void run_thread(const int month, board_t * solutions, int * n_thread_solutions) {
   int tid = thread_id();
 
-  extern __shared__ piece_t pieces[N_PIECES];
-  if (threadIdx.x == 0) {
-    initialize_pieces(pieces);
+  SHARED pieces_t pieces;
+  if ((thread_id() % NUM_THREADS_PER_BLOCK) == 0) {
+    initialize_pieces(&pieces);
   }
 
+#ifndef DEBUG
   __syncthreads();
+#endif
 
-  context_t ctx = {pieces, &solutions[tid * N_SOLUTIONS_PER_THREAD]};
+  context_t ctx = {&pieces, &solutions[tid * N_SOLUTIONS_PER_THREAD]};
   initialize_board(&ctx.board);
   ctx.n_solutions = 0;
   ctx.task = 0;
 
   int month_i = month % 6;
   int month_j = month / 6;
-  board_set(&ctx.board, month_i, month_j, 'D');
+  board_set(&ctx.board, month_i, month_j);
 
   for (int day = 0; day < days[month]; day++) {
   // for (int day = 0; day < 1; day++) {
     int day_i = day % 7;
     int day_j = day / 7 + 2;
-    board_set(&ctx.board, day_i, day_j, 'D');
+    board_set(&ctx.board, day_i, day_j);
 
     int result = solve(&ctx, 0);
     if (result) {
-      n_thread_solutions[tid] = result;
+      n_thread_solutions[tid] = -result;
       return;
     }
 
-    board_set(&ctx.board, day_i, day_j, 0);
+    board_unset(&ctx.board, day_i, day_j);
   }
 
   n_thread_solutions[tid] = ctx.n_solutions;
@@ -356,19 +428,31 @@ int main(int argc, char * argv[]) {
    printf("Setting flags: %d\n", setFlags);
   }
 
+  int setLimit = cudaDeviceSetLimit(cudaLimitStackSize, CUDA_STACK_SIZE);
+  if (setLimit) {
+   printf("Setting limit: %d\n", setLimit);
+  }
+
+  // device memory
   board_t * dsolutions = NULL;
   int *dn_solutions = NULL;
   cudaMalloc((void **) &dsolutions, sizeof(board_t) * N_SOLUTIONS_PER_THREAD * NUM_THREADS);
   cudaMalloc((void **) &dn_solutions, sizeof(int) * NUM_THREADS);
 
+  // host memory
+  board_t * solutions = (board_t *) malloc(sizeof(board_t) * N_SOLUTIONS_PER_THREAD * NUM_THREADS);
+  int n_solutions[NUM_THREADS];
+
+#ifdef DEBUG
+  run_thread(month, solutions, n_solutions);
+#else
   run_thread<<<NUM_BLOCKS, NUM_THREADS_PER_BLOCK>>>(month, dsolutions, dn_solutions);
   cudaError_t err = cudaGetLastError();
   printf("Err: %s\n", cudaGetErrorString(err));
 
-  board_t * solutions = (board_t *) malloc(sizeof(board_t) * N_SOLUTIONS_PER_THREAD * NUM_THREADS);
-  int n_solutions[NUM_THREADS];
   cudaMemcpy(solutions, dsolutions, sizeof(board_t) * N_SOLUTIONS_PER_THREAD * NUM_THREADS, cudaMemcpyDeviceToHost);
   cudaMemcpy(n_solutions, dn_solutions, sizeof(int) * NUM_THREADS, cudaMemcpyDeviceToHost);
+#endif
 
   cudaFree(dsolutions);
   cudaFree(dn_solutions);
@@ -376,9 +460,9 @@ int main(int argc, char * argv[]) {
   int total = 0;
   for (int tid = 0; tid < NUM_THREADS; tid++) {
     total += n_solutions[tid];
-    if (n_solutions[tid] < 0) {
+    // if (n_solutions[tid] < 0) {
       printf("%d: %d\n", tid, n_solutions[tid]);
-    }
+    // }
   }
   printf("total: %d\n", total);
 
