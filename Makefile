@@ -16,4 +16,4 @@ reload_driver:
 	sudo modprobe nvidia_uvm
 
 clean:
-	rm puzzle solve
+	rm -f puzzle solve
