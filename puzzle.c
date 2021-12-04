@@ -6,6 +6,7 @@
 #define BOARD_HEIGHT 7
 
 #define N_PIECES 8
+#define N_DEFINITIONS 13
 
 typedef unsigned char bool;
 #define true ((bool) 1)
@@ -58,56 +59,78 @@ static inline cell board_get(board * board, int i, int j) {
   return board->cells[j * BOARD_WIDTH + i];
 }
 
-definition definitions[N_PIECES] = {
+definition all_definitions[N_DEFINITIONS] = {
   { false, 2,
     { 2, 3, false, (cell[]) {
       'O', 'O', 'O',
       'O', 'O', 'O' } } },
+  // 0
   { true, 4,
     { 2, 3, false, (cell[]) {
       'P', 'P', 0 ,
       'P', 'P', 'P' } } },
+  // 1
   { false, 4,
     { 2, 3, false, (cell[]) {
-      'C', 'C', 'C',
-      'C',  0 , 'C' } } },
+      'U', 'U', 'U',
+      'U',  0 , 'U' } } },
+  // 2
   { false, 4,
     { 3, 3, false, (cell[]) {
-      'L', 'L', 'L',
-      'L',  0 ,  0 ,
-      'L',  0 ,  0 , } } },
+      'V', 'V', 'V',
+      'V',  0 ,  0 ,
+      'V',  0 ,  0 , } } },
+  // 3
   { true, 2,
     { 3, 3, false, (cell[]) {
-      'S', 'S',  0 ,
-       0 , 'S',  0 ,
-       0 , 'S', 'S', } } },
+      'Z', 'Z',  0 ,
+       0 , 'Z',  0 ,
+       0 , 'Z', 'Z', } } },
+  // 4
   { true, 4,
     { 2, 4, false, (cell[]) {
-      'j', 'j', 'j', 'j',
-      'j',  0 ,  0 ,  0  } } },
+      'L', 'L', 'L', 'L',
+      'L',  0 ,  0 ,  0  } } },
+  // 5
   { true, 4,
     { 2, 4, false, (cell[]) {
-      'T', 'T', 'T', 'T',
-       0 ,  0 , 'T',  0  } } },
-/*
+      'Y', 'Y', 'Y', 'Y',
+       0 ,  0 , 'Y',  0  } } },
+  // 6
   { true, 4,
     { 2, 4, false, (cell[]) {
-       0 , 'Z', 'Z', 'Z',
-      'Z', 'Z',  0 ,  0  } } },
-*/
-/*
+       0 , 'N', 'N', 'N',
+      'N', 'N',  0 ,  0  } } },
+  // 7
   { false, 1,
     { 3, 3, false, (cell[]) {
-       0 , '+',  0 ,
-      '+', '+', '+',
-       0 , '+',  0 } } },
-*/
+       0 , 'X',  0 ,
+      'X', 'X', 'X',
+       0 , 'X',  0 } } },
+  // 8
   { false, 4,
     { 3, 3, false, (cell[]) {
       'W', 'W',  0 ,
        0 , 'W', 'W',
        0 ,  0 , 'W'} } },
+  // 9
+  { false, 2,
+    { 5, 1, false, (cell[]) {
+      'I', 'I', 'I', 'I', 'I'} } },
+  // 10
+  { true, 4,
+    { 3, 3, false, (cell[]) {
+      'F', 'F',  0 ,
+       0 , 'F', 'F',
+       0 , 'F',  0 , } } },
+  // 11
+  { false, 4,
+    { 3, 3, false, (cell[]) {
+      'T', 'T', 'T',
+       0 , 'T',  0 ,
+       0 , 'T',  0 , } } },
 };
+piece all_pieces[N_DEFINITIONS];
 
 piece pieces[N_PIECES];
 
@@ -116,6 +139,50 @@ rotation rotations[4] = {
   {  0,  1, -1,  0 },
   { -1,  0,  0, -1 },
   {  0, -1,  1,  0 },
+};
+
+#define N_COMBINATIONS 37
+
+
+// 0:P 1:U 2:V 3:Z 4:L 5:Y 6:N 7:X 8:W 9:I 10:F 11:T
+int combinations[][N_PIECES - 1] = {
+  { 0, 1, 2, 3, 4, 5, 10 },   // 18872  7 205 P-U-V-Z-L-Y-F
+  { 0, 1, 2, 3, 4, 5, 6 },    // 24405  7 216 P-U-V-Z-L-Y-N
+  { 0, 1, 2, 3, 4, 5, 8 },    //  7281  1  97 P-U-V-Z-L-Y-W
+  { 0, 1, 2, 3, 4, 5, 9 },    // 10300  2 114 P-U-V-Z-L-Y-I
+  { 0, 1, 2, 3, 4, 6, 10 },   // 15667  3 169 P-U-V-Z-L-N-F
+  { 0, 1, 2, 3, 4, 6, 8 },    //  6123  1  81 P-U-V-Z-L-N-W
+  { 0, 1, 2, 3, 4, 9, 10 },   //  7088  2  86 P-U-V-Z-L-I-F
+  { 0, 1, 2, 3, 5, 10, 11 },  //  5991  1  49 P-U-V-Z-Y-F-T // hard!
+  { 0, 1, 2, 3, 5, 6, 10 },   // 11980  1 126 P-U-V-Z-Y-N-F
+  { 0, 1, 2, 4, 5, 10, 11 },  // 19503  6 161 P-U-V-L-Y-F-T
+  { 0, 1, 2, 4, 5, 6, 10 },   // 36485 19 434 P-U-V-L-Y-N-F // very many solutions
+  { 0, 1, 2, 4, 5, 6, 11 },   // 22625 10 208 P-U-V-L-Y-N-T
+  { 0, 1, 2, 4, 5, 6, 8 },    // 14664  1 189 P-U-V-L-Y-N-W
+  { 0, 1, 2, 4, 5, 6, 9 },    // 20330  2 350 P-U-V-L-Y-N-I
+  { 0, 1, 2, 4, 5, 8, 10 },   // 15105  3 275 P-U-V-L-Y-W-F
+  { 0, 1, 2, 4, 5, 8, 11 },   //  7252  1 130 P-U-V-L-Y-W-T
+  { 0, 1, 2, 4, 5, 9, 10 },   // 16154  6 244 P-U-V-L-Y-I-F
+  { 0, 1, 2, 4, 5, 9, 11 },   // 11507  3 145 P-U-V-L-Y-I-T
+  { 0, 1, 2, 4, 6, 10, 11 },  // 14283  1 149 P-U-V-L-N-F-T
+  { 0, 1, 2, 4, 6, 9, 11 },   //  8546  3 131 P-U-V-L-N-I-T
+  { 0, 1, 2, 5, 6, 10, 11 },  // 11117  3 124 P-U-V-Y-N-F-T
+  { 0, 1, 2, 5, 6, 9, 10 },   //  9495  1 112 P-U-V-Y-N-I-F
+  { 0, 1, 3, 4, 5, 10, 11 },  //  7590  2  82 P-U-Z-L-Y-F-T
+  { 0, 1, 3, 4, 5, 6, 10 },   // 17151  1 163 P-U-Z-L-Y-N-F
+  { 0, 1, 3, 4, 5, 6, 11 },   // 10357  2 111 P-U-Z-L-Y-N-T
+  { 0, 1, 3, 4, 5, 6, 8 },    //  7693  1 109 P-U-Z-L-Y-N-W
+  { 0, 1, 3, 4, 5, 6, 9 },    //  9146  2 115 P-U-Z-L-Y-N-I
+  { 0, 1, 4, 5, 6, 10, 11 },  // 19663  4 188 P-U-L-Y-N-F-T
+  { 0, 1, 4, 5, 6, 9, 10 },   // 18234  3 227 P-U-L-Y-N-I-F
+  { 0, 1, 4, 5, 6, 9, 11 },   // 12198  1 138 P-U-L-Y-N-I-T
+  { 0, 2, 3, 4, 5, 6, 10 },   // 18910  4 170 P-V-Z-L-Y-N-F
+  { 0, 2, 3, 4, 5, 6, 11 },   // 14417  2 148 P-V-Z-L-Y-N-T
+  { 0, 2, 3, 4, 5, 6, 8 },    // 11346  2 163 P-V-Z-L-Y-N-W
+  { 0, 2, 4, 5, 6, 10, 11 },  // 18891  3 178 P-V-L-Y-N-F-T
+  { 0, 2, 4, 5, 6, 8, 10 },   // 16090  1 240 P-V-L-Y-N-W-F
+  { 0, 2, 4, 5, 6, 9, 10 },   // 15587  1 182 P-V-L-Y-N-I-F
+  { 0, 2, 4, 5, 8, 10, 11 },  //  7044  1  87 P-V-L-Y-W-F-T
 };
 
 void print_orientation(char * prefix, orientation * o) {
@@ -249,6 +316,7 @@ solution * solve(board * board, int p) {
     result = malloc(sizeof(solution));
     result->next = 0;
     memcpy(&result->board, board, sizeof(struct _board));
+    // print_board(stdout, board);
     return result;
   }
 
@@ -277,6 +345,49 @@ solution * solve(board * board, int p) {
   return result;
 }
 
+void free_solutions(solution * s) {
+  if (s == 0) {
+    return;
+  }
+  free(s->next);
+}
+
+// (0, 0): 1
+// (1, 1): (0, 1) + (1, 0): 2
+int binomial(int m, int n) {
+  if (m == 0 || n == 0) {
+    return 1;
+  }
+  int result = binomial(m - 1, n) + binomial(m, n - 1);
+  return result;
+}
+
+void calc_subsets(int m, int n, int* out, int stride) {
+  if (n == 0) {
+    for (int i = 0; i < m; i++) {
+      out[i] = i;
+    }
+  } else if (m == 0) {
+    for (int i = 0; i < n; i++) {
+      out[stride - i - 1] = i;
+    }
+  } else {
+    int num_m = binomial(m, n - 1);
+    int num_n = binomial(m - 1, n);
+
+    calc_subsets(m, n - 1, out, stride);
+    for (int i = 0; i < num_m; i++) {
+      out[(i + 1) * stride - n] = m + n - 1;
+    }
+
+    int offset = num_m * stride;
+    calc_subsets(m - 1, n, &out[offset], stride);
+    for (int i = 0; i < num_n; i++) {
+      out[offset + i * stride + m - 1] = m + n - 1;
+    }
+  }
+}
+
 char * months[] = {
   "jan", "feb", "mar", "apr", "mai", "jun", "jul", "aug", "sep", "okt", "nov", "des"
 };
@@ -284,25 +395,17 @@ int days[] = {
   31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31
 };
 
-int main(int argc, char * argv[]) {
-  if (argc < 2) {
-    fprintf(stderr, "Usage: %s <month> [--noflip]\n", argv[0]);
-    return -1;
-  }
-  int month = atoi(argv[1]);
-  bool allow_flip = (argc < 3) || (strcmp(argv[2], "--noflip") != 0);
-
-  board * board = initialize_board();
-  for (int p = 0; p < N_PIECES; p++) {
-    initialize_piece(&definitions[p], &pieces[p], allow_flip);
-  }
-
+void count_solutions(board * board, int subset, int month) {
   // for (int month = 0; month < 12; month++) {
     for (int day = 0; day < days[month]; day++) {
+      /*
       char filename[11];
       sprintf(filename, "out/%s-%d", months[month], day + 1);
       printf("%s: ", filename);
       fflush(stdout);
+      */
+      // printf(" d:%d ", day);
+      // fflush(stdout);
 
       int month_i = month % 6;
       int month_j = month / 6;
@@ -314,18 +417,87 @@ int main(int argc, char * argv[]) {
 
       solution * solutions = solve(board, 0);
       int n_solutions = 0;
-      FILE * out = fopen(filename, "w");
+      // FILE * out = fopen(filename, "w");
       while (solutions) {
         n_solutions++;
-        print_board(out, &solutions->board);
-        fprintf(out, "\n");
+        // print_board(out, &solutions->board);
+        // fprintf(out, "\n");
         solutions = solutions->next;
       }
-      fclose(out);
-      printf("%d\n", n_solutions);
+      // fclose(out);
+      printf("%d-%d-%d: %d\n", subset, month, day, n_solutions);
+      fflush(stdout);
+      free_solutions(solutions);
 
       board_set(board, day_i, day_j, 0);
       board_set(board, month_i, month_j, 0);
+
+      //if (n_solutions == 0) {
+      //  return false;
+      //}
     }
   // }
+  //return true;
 }
+
+
+int main(int argc, char * argv[]) {
+  int test_m = N_PIECES - 1;
+  int test_n = N_DEFINITIONS - N_PIECES;
+  int n_subsets = binomial(test_m, test_n);
+  // printf("(%d, %d): %d\n", test_m, test_n, n_subsets);
+
+  int stride = test_m + test_n;
+  int * subsets = malloc(n_subsets * stride * sizeof(int));
+  calc_subsets(test_m, test_n, subsets, stride);
+
+  /*
+  for (int i = 0; i < n_subsets; i++) {
+    for (int j = 0; j < test_m; j++) {
+      printf("%d ", buffer[i * stride + j]);
+    }
+    for (int j = 0; j < test_n; j++) {
+      printf("%d ", buffer[i * stride + j + test_m]);
+    }
+    printf("\n");
+  }
+  */
+  // return 0;
+
+  if (argc < 3) {
+    fprintf(stderr, "Usage: %s <id> <total>\n", argv[0]);
+    return -1;
+  }
+  int p_id = atoi(argv[1]);
+  int n_p = atoi(argv[2]);
+  bool allow_flip = true;
+
+  board * board = initialize_board();
+  for (int p = 0; p < N_DEFINITIONS; p++) {
+    initialize_piece(&all_definitions[p], &all_pieces[p], allow_flip);
+  }
+
+  pieces[0] = all_pieces[0];
+  for (int subset = 0; subset < N_COMBINATIONS; subset++) {
+    for (int month = 0; month < 12; month++) {
+      if ((subset * 12 + month) % n_p != p_id) {
+        continue;
+      }
+      int * combination = combinations[subset];
+      for (int piece = 0; piece < N_PIECES - 1; piece++) {
+        pieces[piece + 1] = all_pieces[combination[piece] + 1];
+      }
+      count_solutions(board, subset, month);
+    }
+    /*
+    printf("%d: ", month);
+    for (int j = 0; j < test_m; j++) {
+      printf("%d", subsets[subset * stride + j]);
+    }
+    fflush(stdout);
+    printf("\n");
+    */
+  }
+  return 0;
+}
+
